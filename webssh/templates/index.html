@@ -17,6 +17,19 @@
         margin-top: 20px;
       }
 
+      .env_container {
+        margin-left: 0px;
+      }
+
+      .pj_container {
+        margin-left: 20px;
+      }
+
+      .srv_container {
+        margin-left: 40px;        
+      }
+      
+      
       .btn {
         margin-top: 15px;
       }
@@ -91,11 +104,110 @@
       <div id="terminal"></div>
     </div>
 
+    <div class="container" id="containers">
+
+    </div>
+
     <script src="static/js/jquery.min.js"></script>
     <script src="static/js/popper.min.js"></script>
     <script src="static/js/bootstrap.min.js"></script>
     <script src="static/js/xterm.min.js"></script>
     <script src="static/js/xterm-addon-fit.min.js"></script>
     <script src="static/js/main.js"></script>
+    <script>
+    var accounts;
+/**
+ * Used to load and execute javascript file. Suffers from same-domain restriction.
+ * @param file JS file name
+ * @param callback Subscribe to get notified when script file is loaded
+ **/
+ function requireXhr(file, callback) {
+  // object initialization
+  const xhr = new XMLHttpRequest();
+
+  // subscribe to request events
+  xhr.onreadystatechange = function () {
+    // readyState:
+    // 0 UNSENT Client has been created. open() not called yet.
+    // 1 OPENED open() has been called.
+    // 2 HEADERS_RECEIVED send() has been called, and headers and status are available.
+    // 3 LOADING Downloading; responseText holds partial data.
+    // 4 DONE The operation is complete.
+
+    // when not done, return
+    if (xhr.readyState !== 4) {
+      return;
+    }
+
+    // done, check status code
+    if (xhr.status !== 200) // 200 = OK
+    {
+      return;
+    }
+
+    // now the file is loaded,
+    // go and execute the script
+    //eval(xhr.responseText);
+    accounts =JSON.parse(xhr.responseText);
+
+    // notify caller
+    if (callback) {
+      callback();
+    }
+  };
+
+  // open connection to file
+  xhr.open("GET", file, true);
+
+  // send the request
+  xhr.send();
+}
+
+
+function _loadEnvConfig(cfg){
+  requireXhr(cfg, function () {
+    _init();
+  });
+}
+
+function _init(){
+      if(accounts){
+        containers = document.getElementById("containers");
+        for (const [key, env] of Object.entries(accounts)) {
+          env_containers = document.createElement('DIV');
+          env_containers.id="container_" + key;
+          env_containers.className = 'env_container';
+          env_label = document.createElement("DIV");
+          env_label.innerHTML=key+' : ';
+          env_containers.appendChild(env_label);
+          console.log(`${key}: ${env}`);
+          for (const [pkey, project] of Object.entries(env)) {
+            pj_containers = document.createElement('DIV');
+            pj_containers.id="Servies_" + key + pkey;
+            pj_containers.className = "pj_container"
+            pj_label = document.createElement("DIV");
+            pj_label.innerHTML= pkey+' : ';
+            pj_containers.appendChild(pj_label);
+            
+            console.log(`${pkey}: ${project}`);
+            for (const [skey, server] of Object.entries(project)) {
+              srv_containers = document.createElement('DIV');
+              srv_containers.id="server" + server.H + server.P;
+              srv_containers.className = 'srv_container';
+              srv_containers.innerHTML='<a href="/?hostname='+server.H+'&username='+server.U+'&password='+server.Pwd+'">'+server.Tag+'</a>'
+              console.log(`${server.Tag}: ${server.H}`);
+              console.log(`${server.Tag}: ${server.P}`);
+              console.log(`${server.Tag}: ${server.U}`);
+              console.log(`${server.Tag}: ${server.Pwd}`);
+              console.log(`${server.Tag}: ${server.password}`);
+              pj_containers.appendChild(srv_containers);              
+            }
+            env_containers.appendChild(pj_containers);
+          }
+          containers.appendChild(env_containers);
+        }
+      }
+}
+    </script>
   </body>
 </html>

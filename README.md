@@ -20,6 +20,7 @@ A simple web application to be used as an ssh client to connect to your ssh serv
 * Terminal window resizable.
 * Auto detect the ssh server's default encoding.
 * Modern browsers including Chrome, Firefox, Safari, Edge, Opera supported.
+* Enable to load the server list from an external server.
 
 
 ### Preview
@@ -71,6 +72,19 @@ wssh --help
 ```
 
 ### Browser console
+
+Dynamically Loading on Console:
+```javascript
+_loadEnvConfig("http://localhost/accounts.js")
+```
+
+or
+```html
+<script src="static/js/accounts.js"></script>
+<script>
+   _init();
+</script>
+```
 
 ```javascript
 // connect to your ssh server
