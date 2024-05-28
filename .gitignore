@@ -63,3 +63,5 @@ target/
 
 # known_hosts file
 known_hosts
+webssh/static/js/accounts_egl.js
+.gitignore
