@@ -57,6 +57,7 @@
         <div class="row">
           <div class="col">
             <label for="Hostname">Hostname</label>
+            <input class="form-control" type="hidden" id="title" name="title" value="SSH">
             <input class="form-control" type="text" id="hostname" name="hostname" value="" required>
           </div>
           <div class="col">
@@ -97,6 +98,7 @@
         <button type="submit" class="btn btn-primary">Connect</button>
         <button type="reset" class="btn btn-danger">Reset</button>
       </form>
+      Cfg: <input class="form-control" type="text" id="conf" name="conf" value=""> <button type="button" onclick="javascript:_loadEnvConfig(document.getElementById('conf').value)" class="btn btn-primary">Load Config File</button>
     </div>
 
     <div class="container">
@@ -173,6 +175,7 @@ function _loadEnvConfig(cfg){
 function _init(){
       if(accounts){
         containers = document.getElementById("containers");
+        containers.replaceChildren();
         for (const [key, env] of Object.entries(accounts)) {
           env_containers = document.createElement('DIV');
           env_containers.id="container_" + key;
@@ -194,7 +197,11 @@ function _init(){
               srv_containers = document.createElement('DIV');
               srv_containers.id="server" + server.H + server.P;
               srv_containers.className = 'srv_container';
-              srv_containers.innerHTML='<a href="/?hostname='+server.H+'&username='+server.U+'&password='+server.Pwd+'">'+server.Tag+'</a>'
+              if(server.password!=null){
+                srv_containers.innerHTML='<a href="#" onclick="javascript:_submit(\''+server.H+'\',\''+server.P+'\',\''+server.U+'\',\''+server.password+'\');">'+server.Tag+'</a>';
+              }else{
+                srv_containers.innerHTML='<a href="/?hostname='+server.H+'&username='+server.U+'&password='+server.Pwd+'&title='+server.Tag+'">'+server.Tag+'</a>'
+              }
               console.log(`${server.Tag}: ${server.H}`);
               console.log(`${server.Tag}: ${server.P}`);
               console.log(`${server.Tag}: ${server.U}`);
@@ -207,6 +214,16 @@ function _init(){
           containers.appendChild(env_containers);
         }
       }
+}
+
+function _submit(h,p,u,password){
+  frm = document.forms[0];
+  frm.title.value = h;
+  frm.hostname.value = h;
+  frm.port.value = p;
+  frm.username.value = u;
+  frm.password.value =  password;
+  frm.submit();
 }
     </script>
   </body>
