@@ -159,7 +159,7 @@
   };
 
   // open connection to file
-  xhr.open("GET", file, true);
+  xhr.open("GET", file+"?.rnd="+Math.random(), true);
 
   // send the request
   xhr.send();
