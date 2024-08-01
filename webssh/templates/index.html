@@ -15,18 +15,23 @@
 
       .container {
         margin-top: 20px;
+        cursor: pointer;
       }
 
       .env_container {
-        margin-left: 0px;
+        margin-left: 20px;
+        display: none;
+        cursor: pointer;
       }
 
       .pj_container {
         margin-left: 20px;
+        display: none;
+        cursor: pointer;
       }
 
       .srv_container {
-        margin-left: 40px;        
+        margin-left: 20px;        
       }
       
       
@@ -181,17 +186,16 @@ function _init(){
           env_containers.id="container_" + key;
           env_containers.className = 'env_container';
           env_label = document.createElement("DIV");
-          env_label.innerHTML=key+' : ';
-          env_containers.appendChild(env_label);
+          env_label.innerHTML='<span onclick="javascript:hidOrShowItem(\''+key+'\',\''+env_containers.id+'\')"><span id='+ key +' > + </span> '+key+' </span>';
+          containers.appendChild(env_label);
           console.log(`${key}: ${env}`);
           for (const [pkey, project] of Object.entries(env)) {
             pj_containers = document.createElement('DIV');
             pj_containers.id="Servies_" + key + pkey;
             pj_containers.className = "pj_container"
             pj_label = document.createElement("DIV");
-            pj_label.innerHTML= pkey+' : ';
-            pj_containers.appendChild(pj_label);
-            
+            pj_label.innerHTML= '<span onclick="javascript:hidOrShowItem(\''+pkey+'\',\''+pj_containers.id+'\')"><span id='+ pkey +'> + </span> ' + pkey+' </span>';
+            env_containers.appendChild(pj_label);            
             console.log(`${pkey}: ${project}`);
             for (const [skey, server] of Object.entries(project)) {
               srv_containers = document.createElement('DIV');
@@ -200,7 +204,7 @@ function _init(){
               if(server.password!=null){
                 srv_containers.innerHTML='<a href="#" onclick="javascript:_submit(\''+server.H+'\',\''+server.P+'\',\''+server.U+'\',\''+server.password+'\');">'+server.Tag+'</a>';
               }else{
-                srv_containers.innerHTML='<a href="/?hostname='+server.H+'&username='+server.U+'&password='+server.Pwd+'&title='+server.Tag+'">'+server.Tag+'</a>'
+                srv_containers.innerHTML='<a href="/?hostname='+server.H+'&username='+server.U+'&password='+server.Pwd+'&title='+server.Tag+'" target="_blank">'+server.Tag+'</a>'
               }
               console.log(`${server.Tag}: ${server.H}`);
               console.log(`${server.Tag}: ${server.P}`);
@@ -214,6 +218,16 @@ function _init(){
           containers.appendChild(env_containers);
         }
       }
+}
+
+function hidOrShowItem(key,targetObj){
+  if(document.getElementById(key).innerText=="-"){
+    document.getElementById(key).innerText="+";
+    document.getElementById(targetObj).style="display:none";
+  }else{
+    document.getElementById(key).innerText="-";
+    document.getElementById(targetObj).style="display:block";
+  }
 }
 
 function _submit(h,p,u,password){
