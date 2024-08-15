@@ -51,10 +51,18 @@
       body {
         font-family: '{{ font.family }}';
       }
+
+      .dark_mode{
+        background-color: #2b2222;
+        color: #d5cccc;
+      }
+
       {% end %}
     </style>
+
+
   </head>
-  <body>
+  <body onload="javascript:autoSelect()">
     <div id="waiter" style="display: none"> Connecting ... </div>
 
     <div class="container form-container" style="display: none">
@@ -102,6 +110,8 @@
         {% module xsrf_form_html() %}
         <button type="submit" class="btn btn-primary">Connect</button>
         <button type="reset" class="btn btn-danger">Reset</button>
+        <button type="button" class="btn btn-primary" onclick="javascript:bright()">Bright</button>
+        <button type="button" class="btn btn-primary" onclick="javascript:dark()">Dark</button>
       </form>
       Cfg: <input class="form-control" type="text" id="conf" name="conf" value=""> <button type="button" onclick="javascript:_loadEnvConfig(document.getElementById('conf').value)" class="btn btn-primary">Load Config File</button>
     </div>
@@ -240,5 +250,25 @@ function _submit(h,p,u,password){
   frm.submit();
 }
     </script>
-  </body>
-</html>
+    <script>
+      function dark(){
+        document.body.style.backgroundColor='#2b2222'
+        document.body.style.color='#d5cccc';
+      }
+      function bright(){
+        document.body.style.backgroundColor='#fff'
+        document.body.style.color='#000';
+      }
+      function autoSelect(){
+        var nowDate = new Date();
+        var hour = nowDate.getHours();
+        if( hour >= 6 && hour < 18 ){
+          bright();
+        }else{
+          dark();
+        }
+      }
+    </script>
+</body>
+
+  </html>
