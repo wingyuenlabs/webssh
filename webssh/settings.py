@@ -20,9 +20,9 @@ def print_version(flag):
 
 
 define('address', default='', help='Listen address')
-define('port', type=int, default=8888,  help='Listen port')
+define('port', type=int, default=88,  help='Listen port')
 define('ssladdress', default='', help='SSL listen address')
-define('sslport', type=int, default=4433,  help='SSL listen port')
+define('sslport', type=int, default=443,  help='SSL listen port')
 define('certfile', default='', help='SSL certificate file')
 define('keyfile', default='', help='SSL private key file')
 define('debug', type=bool, default=False, help='Debug mode')

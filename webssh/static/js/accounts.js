@@ -6,6 +6,7 @@
                 "Tag": "Production",
                 "Pwd": "-",
 				"password":"-",
+                "privatekey":null,
                 "P": 22,
                 "U": "root"
             }            
@@ -16,6 +17,7 @@
                 "Tag": "cms.example.com",
                 "Pwd": "-",
 				"password":"-",
+                "privatekey":null,
                 "P": 22,
                 "U": "root"
             }
@@ -26,6 +28,7 @@
                 "Tag": "jobs Production",
                 "Pwd": "-",
 				"password":"-",
+                "privatekey":null,
                 "P": 22,
                 "U": "root"
             }

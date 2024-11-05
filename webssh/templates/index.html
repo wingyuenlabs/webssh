@@ -213,8 +213,10 @@ function _init(){
               srv_containers.className = 'srv_container';
               if(server.password!=null){
                 srv_containers.innerHTML='<a href="#" onclick="javascript:_submit(\''+server.H+'\',\''+server.P+'\',\''+server.U+'\',\''+server.password+'\');">'+server.Tag+'</a>';
-              }else{
+              }else if(server.Pwd!=null){
                 srv_containers.innerHTML='<a href="/?hostname='+server.H+'&username='+server.U+'&password='+server.Pwd+'&title='+server.Tag+'" target="_blank">'+server.Tag+'</a>'
+              }else if(server.privatekey!=null){
+                srv_containers.innerHTML='<a href="#" onclick="javascript:_submitPK(\''+server.H+'\',\''+server.P+'\',\''+server.U+'\',\''+server.privatekey+'\');">'+server.Tag+'</a>';
               }
               console.log(`${server.Tag}: ${server.H}`);
               console.log(`${server.Tag}: ${server.P}`);
@@ -248,6 +250,22 @@ function _submit(h,p,u,password){
   frm.username.value = u;
   frm.password.value =  password;
   frm.submit();
+}
+
+document.getElementById('privatekey').addEventListener('change', function(e) {
+  if (e.target.files[0]) {
+    //document.forms[0].submit();
+  }
+});
+
+
+function _submitPK(h,p,u,privatekey){
+  frm = document.forms[0];
+  frm.title.value = h;
+  frm.hostname.value = h;
+  frm.port.value = p;
+  frm.username.value = u;
+  frm.privatekey.click();  
 }
     </script>
     <script>
