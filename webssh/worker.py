@@ -1,9 +1,12 @@
 import logging
+import time
+from typing import Dict, Optional, Tuple
 try:
     import secrets
 except ImportError:
     secrets = None
 import tornado.websocket
+import paramiko
 
 from uuid import uuid4
 from tornado.ioloop import IOLoop
@@ -12,10 +15,10 @@ from tornado.util import errno_from_exception
 
 
 BUF_SIZE = 32 * 1024
-clients = {}  # {ip: {id: worker}}
+clients: Dict[str, Dict[str, 'Worker']] = {}  # {ip: {id: worker}}
 
 
-def clear_worker(worker, clients):
+def clear_worker(worker: 'Worker', clients: Dict[str, Dict[str, 'Worker']]) -> None:
     ip = worker.src_addr[0]
     workers = clients.get(ip)
     assert worker.id in workers
@@ -27,7 +30,7 @@ def clear_worker(worker, clients):
             clients.clear()
 
 
-def recycle_worker(worker):
+def recycle_worker(worker: 'Worker') -> None:
     if worker.handler:
         return
     logging.warning('Recycling worker {}'.format(worker.id))
@@ -35,7 +38,7 @@ def recycle_worker(worker):
 
 
 class Worker(object):
-    def __init__(self, loop, ssh, chan, dst_addr):
+    def __init__(self, loop: IOLoop, ssh: paramiko.SSHClient, chan: paramiko.Channel, dst_addr: Tuple[str, int]):
         self.loop = loop
         self.ssh = ssh
         self.chan = chan
@@ -46,6 +49,7 @@ class Worker(object):
         self.handler = None
         self.mode = IOLoop.READ
         self.closed = False
+        self.last_activity = time.time()
 
     def __call__(self, fd, events):
         if events & IOLoop.READ:
@@ -56,7 +60,7 @@ class Worker(object):
             self.close(reason='error event occurred')
 
     @classmethod
-    def gen_id(cls):
+    def gen_id(cls) -> str:
         return secrets.token_urlsafe(nbytes=32) if secrets else uuid4().hex
 
     def set_handler(self, handler):
@@ -72,6 +76,7 @@ class Worker(object):
 
     def on_read(self):
         logging.debug('worker {} on read'.format(self.id))
+        self.last_activity = time.time()
         try:
             data = self.chan.recv(BUF_SIZE)
         except (OSError, IOError) as e:
@@ -92,10 +97,15 @@ class Worker(object):
 
     def on_write(self):
         logging.debug('worker {} on write'.format(self.id))
+        self.last_activity = time.time()
         if not self.data_to_dst:
             return
 
-        data = ''.join(self.data_to_dst)
+        # Properly handle both string and binary data
+        if isinstance(self.data_to_dst[0], bytes):
+            data = b''.join(self.data_to_dst)
+        else:
+            data = ''.join(self.data_to_dst)
         logging.debug('{!r} to {}:{}'.format(data, *self.dst_addr))
 
         try:
@@ -115,7 +125,7 @@ class Worker(object):
             else:
                 self.update_handler(IOLoop.READ)
 
-    def close(self, reason=None):
+    def close(self, reason: Optional[str] = None) -> None:
         if self.closed:
             return
         self.closed = True
@@ -132,3 +142,55 @@ class Worker(object):
 
         clear_worker(self, clients)
         logging.debug(clients)
+
+
+def check_session_timeout(options):
+    """Check and close timed-out sessions"""
+    if options.session_timeout <= 0:
+        return
+    
+    now = time.time()
+    timeout = options.session_timeout
+    expired_workers = []
+    
+    # Create a copy to avoid issues with concurrent modifications
+    try:
+        clients_copy = dict(clients)
+    except RuntimeError:
+        # Dictionary changed during iteration, skip this round
+        return
+    
+    for ip, workers in clients_copy.items():
+        if not workers:
+            continue
+        
+        # Create a copy of workers dict as well
+        try:
+            workers_copy = dict(workers)
+        except RuntimeError:
+            continue
+            
+        for worker_id, worker in workers_copy.items():
+            # Check if worker is valid and has last_activity attribute
+            if worker is None:
+                continue
+            if not hasattr(worker, 'last_activity'):
+                continue
+            if worker.closed:
+                continue
+                
+            try:
+                if now - worker.last_activity > timeout:
+                    expired_workers.append(worker)
+            except (AttributeError, TypeError):
+                # Worker might have been cleaned up
+                continue
+    
+    for worker in expired_workers:
+        try:
+            logging.warning('Session {} timed out after {} seconds of inactivity'.format(
+                worker.id, timeout
+            ))
+            worker.close(reason='session timeout')
+        except Exception as e:
+            logging.error('Error closing timed-out worker: {}'.format(e))

@@ -3,37 +3,84 @@ import json
 import logging
 import socket
 import struct
+import time
 import traceback
 import weakref
 import paramiko
 import tornado.web
 
 from concurrent.futures import ThreadPoolExecutor
+from json.decoder import JSONDecodeError
 from tornado.ioloop import IOLoop
 from tornado.options import options
 from tornado.process import cpu_count
+from urllib.parse import urlparse
 from webssh.utils import (
     is_valid_ip_address, is_valid_port, is_valid_hostname, to_bytes, to_str,
-    to_int, to_ip_address, UnicodeType, is_ip_hostname, is_same_primary_domain,
+    to_int, to_ip_address, is_ip_hostname, is_same_primary_domain,
     is_valid_encoding
 )
 from webssh.worker import Worker, recycle_worker, clients
-
-try:
-    from json.decoder import JSONDecodeError
-except ImportError:
-    JSONDecodeError = ValueError
-
-try:
-    from urllib.parse import urlparse
-except ImportError:
-    from urlparse import urlparse
 
 
 DEFAULT_PORT = 22
 
 swallow_http_errors = True
 redirecting = None
+
+
+class RateLimiter:
+    """Rate limiter to prevent brute force attacks"""
+    def __init__(self):
+        self.attempts = {}  # {ip: [(timestamp, success), ...]}
+    
+    def is_allowed(self, ip):
+        """Check if IP is allowed to make a connection attempt"""
+        now = time.time()
+        window = options.ratelimit_window
+        max_attempts = options.ratelimit
+        
+        # Clean up old attempts
+        if ip in self.attempts:
+            self.attempts[ip] = [
+                (ts, success) for ts, success in self.attempts[ip]
+                if now - ts < window
+            ]
+        
+        # Count recent attempts
+        recent_attempts = len(self.attempts.get(ip, []))
+        
+        if recent_attempts >= max_attempts:
+            logging.warning(
+                'Rate limit exceeded for IP: {} ({}/{} attempts)'.format(
+                    ip, recent_attempts, max_attempts
+                )
+            )
+            return False
+        
+        return True
+    
+    def record_attempt(self, ip, success=False):
+        """Record a connection attempt"""
+        now = time.time()
+        if ip not in self.attempts:
+            self.attempts[ip] = []
+        self.attempts[ip].append((now, success))
+    
+    def cleanup(self):
+        """Remove expired entries"""
+        now = time.time()
+        window = options.ratelimit_window
+        for ip in list(self.attempts.keys()):
+            self.attempts[ip] = [
+                (ts, success) for ts, success in self.attempts[ip]
+                if now - ts < window
+            ]
+            if not self.attempts[ip]:
+                del self.attempts[ip]
+
+
+rate_limiter = RateLimiter()
 
 
 class InvalidValueError(Exception):
@@ -51,12 +98,12 @@ class SSHClient(paramiko.SSHClient):
             elif prompt.startswith('verification'):
                 answers.append(self.totp)
             else:
-                raise ValueError('Unknown prompt: {}'.format(prompt_))
+                raise ValueError('Unknown 2FA prompt: {}. Expected "password" or "verification".'.format(prompt_))
         return answers
 
     def auth_interactive(self, username, handler):
         if not self.totp:
-            raise ValueError('Need a verification code for 2fa.')
+            raise ValueError('Two-factor authentication (2FA) is required. Please provide a verification code.')
         self._transport.auth_interactive(username, handler)
 
     def _auth(self, username, password, pkey, *args):
@@ -121,7 +168,7 @@ class PrivateKey(object):
 
     def check_length(self):
         if len(self.privatekey) > self.max_length:
-            raise InvalidValueError('Invalid key length.')
+            raise InvalidValueError('Private key is too large. Maximum size is {} bytes.'.format(self.max_length))
 
     def parse_name(self, iostr, tag_to_name):
         name = None
@@ -149,7 +196,7 @@ class PrivateKey(object):
         try:
             pkey = pkeycls.from_private_key(self.iostr, password=password)
         except paramiko.PasswordRequiredException:
-            raise InvalidValueError('Need a passphrase to decrypt the key.')
+            raise InvalidValueError('Private key is encrypted and requires a passphrase. Please provide the passphrase to decrypt the key.')
         except (paramiko.SSHException, ValueError) as exc:
             self.last_exception = exc
             logging.debug(str(exc))
@@ -160,7 +207,7 @@ class PrivateKey(object):
         logging.info('Parsing private key {!r}'.format(self.filename))
         name, length = self.parse_name(self.iostr, self.tag_to_name)
         if not name:
-            raise InvalidValueError('Invalid key {}.'.format(self.filename))
+            raise InvalidValueError('Invalid private key format in file "{}". Supported formats: RSA, DSA, ECDSA, Ed25519.'.format(self.filename))
 
         offset = self.iostr.tell() - length
         password = to_bytes(self.password) if self.password else None
@@ -176,10 +223,12 @@ class PrivateKey(object):
             return pkey
 
         logging.error(str(self.last_exception))
-        msg = 'Invalid key'
+        msg = 'Unable to parse private key'
         if self.password:
-            msg += ' or wrong passphrase "{}" for decrypting it.'.format(
+            msg += '. The passphrase "{}" may be incorrect, or the key format is invalid.'.format(
                     self.password)
+        else:
+            msg += '. The key may be encrypted (passphrase required) or in an unsupported format.'
         raise InvalidValueError(msg)
 
 
@@ -272,7 +321,7 @@ class MixinHandler(object):
     def get_value(self, name):
         value = self.get_argument(name)
         if not value:
-            raise InvalidValueError('Missing value {}'.format(name))
+            raise InvalidValueError('Required field "{}" is missing or empty. Please provide a value.'.format(name))
         return value
 
     def get_context_addr(self):
@@ -356,7 +405,7 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
             value = self.decode_argument(data, name=name).strip()
         else:
             # urlencoded form
-            value = self.get_argument(name, u'')
+            value = self.get_argument(name, '')
             filename = ''
 
         return value, filename
@@ -364,17 +413,17 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
     def get_hostname(self):
         value = self.get_value('hostname')
         if not (is_valid_hostname(value) or is_valid_ip_address(value)):
-            raise InvalidValueError('Invalid hostname: {}'.format(value))
+            raise InvalidValueError('Invalid hostname: "{}". Please enter a valid hostname or IP address.'.format(value))
         return value
 
     def get_port(self):
-        value = self.get_argument('port', u'')
+        value = self.get_argument('port', '')
         if not value:
             return DEFAULT_PORT
 
         port = to_int(value)
         if port is None or not is_valid_port(port):
-            raise InvalidValueError('Invalid port: {}'.format(value))
+            raise InvalidValueError('Invalid port number: "{}". Port must be between 1 and 65535.'.format(value))
         return port
 
     def lookup_hostname(self, hostname, port):
@@ -454,15 +503,15 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
         try:
             ssh.connect(*args, timeout=options.timeout)
         except socket.error:
-            raise ValueError('Unable to connect to {}:{}'.format(*dst_addr))
+            raise ValueError('Unable to establish connection to {}:{}. Please verify the hostname and port are correct and the server is reachable.'.format(*dst_addr))
         except paramiko.BadAuthenticationType:
-            raise ValueError('Bad authentication type.')
+            raise ValueError('The SSH server does not support the requested authentication type. Please check your credentials.')
         except paramiko.AuthenticationException:
-            raise ValueError('Authentication failed.')
+            raise ValueError('SSH authentication failed. Please verify your username and password/private key are correct.')
         except paramiko.BadHostKeyException:
-            raise ValueError('Bad host key.')
+            raise ValueError('Host key verification failed. The server\'s host key does not match the known_hosts entry. This could indicate a security issue.')
 
-        term = self.get_argument('term', u'') or u'xterm'
+        term = self.get_argument('term', '') or 'xterm'
         chan = ssh.invoke_shell(term=term)
         chan.setblocking(0)
         worker = Worker(self.loop, ssh, chan, dst_addr)
@@ -471,7 +520,7 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
         return worker
 
     def check_origin(self):
-        event_origin = self.get_argument('_origin', u'')
+        event_origin = self.get_argument('_origin', '')
         header_origin = self.request.headers.get('Origin')
         origin = event_origin or header_origin
 
@@ -492,11 +541,19 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def post(self):
-        if self.debug and self.get_argument('error', u''):
+        if self.debug and self.get_argument('error', ''):
             # for testing purpose only
             raise ValueError('Uncaught exception')
 
         ip, port = self.get_client_addr()
+        
+        # Rate limiting check
+        if not rate_limiter.is_allowed(ip):
+            rate_limiter.record_attempt(ip, success=False)
+            raise tornado.web.HTTPError(
+                429, 'Too many connection attempts. Please try again later.'
+            )
+        
         workers = clients.get(ip, {})
         if workers and len(workers) >= options.maxconn:
             raise tornado.web.HTTPError(403, 'Too many live connections.')
@@ -506,6 +563,7 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
         try:
             args = self.get_args()
         except InvalidValueError as exc:
+            rate_limiter.record_attempt(ip, success=False)
             raise tornado.web.HTTPError(400, str(exc))
 
         future = self.executor.submit(self.ssh_connect, args)
@@ -513,9 +571,24 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
         try:
             worker = yield future
         except (ValueError, paramiko.SSHException) as exc:
+            rate_limiter.record_attempt(ip, success=False)
             logging.error(traceback.format_exc())
-            self.result.update(status=str(exc))
+            # Sanitize error messages in production
+            if self.debug:
+                error_msg = str(exc)
+            else:
+                # Generic error messages for production
+                if 'Authentication' in str(exc):
+                    error_msg = 'Authentication failed.'
+                elif 'connect' in str(exc).lower():
+                    error_msg = 'Connection failed.'
+                elif 'host key' in str(exc).lower():
+                    error_msg = 'Host key verification failed.'
+                else:
+                    error_msg = 'Connection error occurred.'
+            self.result.update(status=error_msg)
         else:
+            rate_limiter.record_attempt(ip, success=True)
             if not workers:
                 clients[ip] = workers
             worker.src_addr = (ip, port)
@@ -589,7 +662,7 @@ class WsockHandler(MixinHandler, tornado.websocket.WebSocketHandler):
                 pass
 
         data = msg.get('data')
-        if data and isinstance(data, UnicodeType):
+        if data and isinstance(data, str):
             worker.data_to_dst.append(data)
             worker.on_write()
 
