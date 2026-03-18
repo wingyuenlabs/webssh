@@ -593,6 +593,10 @@ class IndexHandler(MixinHandler, tornado.web.RequestHandler):
                 clients[ip] = workers
             worker.src_addr = (ip, port)
             workers[worker.id] = worker
+            # Start NO-OP keepalive from main thread
+            from tornado.ioloop import PeriodicCallback
+            worker._noop_callback = PeriodicCallback(worker._send_noop, 60 * 1000)
+            worker._noop_callback.start()
             self.loop.call_later(options.delay, recycle_worker, worker)
             self.result.update(id=worker.id, encoding=worker.encoding)
 

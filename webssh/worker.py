@@ -50,6 +50,19 @@ class Worker(object):
         self.mode = IOLoop.READ
         self.closed = False
         self.last_activity = time.time()
+        # NO-OP callback will be set from main thread after creation
+        self._noop_callback = None
+
+    def _send_noop(self):
+        if self.closed:
+            return
+        try:
+            transport = self.ssh.get_transport()
+            if transport and transport.is_active():
+                transport.send_ignore()
+                logging.debug(f"Sent SSH NO-OP (keepalive) for worker {self.id}")
+        except Exception as e:
+            logging.warning(f"Failed to send SSH NO-OP for worker {self.id}: {e}")
 
     def __call__(self, fd, events):
         if events & IOLoop.READ:
@@ -129,6 +142,14 @@ class Worker(object):
         if self.closed:
             return
         self.closed = True
+
+        # Stop the NO-OP callback
+        if hasattr(self, '_noop_callback') and self._noop_callback is not None:
+            try:
+                self._noop_callback.stop()
+            except Exception:
+                pass
+            self._noop_callback = None
 
         logging.info(
             'Closing worker {} with reason: {}'.format(self.id, reason)
