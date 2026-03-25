@@ -1,15 +1,6 @@
 import ipaddress
 import re
-
-try:
-    from types import UnicodeType
-except ImportError:
-    UnicodeType = str
-
-try:
-    from urllib.parse import urlparse
-except ImportError:
-    from urlparse import urlparse
+from urllib.parse import urlparse
 
 
 numeric = re.compile(r'[0-9]+$')
@@ -23,7 +14,7 @@ def to_str(bstr, encoding='utf-8'):
 
 
 def to_bytes(ustr, encoding='utf-8'):
-    if isinstance(ustr, UnicodeType):
+    if isinstance(ustr, str):
         return ustr.encode(encoding)
     return ustr
 
@@ -56,7 +47,7 @@ def is_valid_port(port):
 
 def is_valid_encoding(encoding):
     try:
-        u'test'.encode(encoding)
+        'test'.encode(encoding)
     except LookupError:
         return False
     except ValueError:

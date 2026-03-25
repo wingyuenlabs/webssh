@@ -20,7 +20,7 @@ def print_version(flag):
 
 
 define('address', default='', help='Listen address')
-define('port', type=int, default=88,  help='Listen port')
+define('port', type=int, default=8888,  help='Listen port')
 define('ssladdress', default='', help='SSL listen address')
 define('sslport', type=int, default=443,  help='SSL listen port')
 define('certfile', default='', help='SSL certificate file')
@@ -47,6 +47,12 @@ define('timeout', type=float, default=3, help='SSH connection timeout')
 define('delay', type=float, default=3, help='The delay to call recycle_worker')
 define('maxconn', type=int, default=20,
        help='Maximum live connections (ssh sessions) per client')
+define('ratelimit', type=int, default=10,
+       help='Maximum connection attempts per IP within rate limit window')
+define('ratelimit_window', type=int, default=60,
+       help='Rate limit time window in seconds')
+define('session_timeout', type=int, default=1800,
+       help='Maximum idle time in seconds before session expires (0 for no timeout)')
 define('font', default='', help='custom font filename')
 define('encoding', default='',
        help='''The default character encoding of ssh servers.
@@ -131,13 +137,13 @@ def get_ssl_context(options):
     if not options.certfile and not options.keyfile:
         return None
     elif not options.certfile:
-        raise ValueError('certfile is not provided')
+        raise ValueError('SSL certificate file path (--certfile) is required when enabling HTTPS.')
     elif not options.keyfile:
-        raise ValueError('keyfile is not provided')
+        raise ValueError('SSL private key file path (--keyfile) is required when enabling HTTPS.')
     elif not os.path.isfile(options.certfile):
-        raise ValueError('File {!r} does not exist'.format(options.certfile))
+        raise ValueError('SSL certificate file not found: {}. Please check the path and file existence.'.format(options.certfile))
     elif not os.path.isfile(options.keyfile):
-        raise ValueError('File {!r} does not exist'.format(options.keyfile))
+        raise ValueError('SSL private key file not found: {}. Please check the path and file existence.'.format(options.keyfile))
     else:
         ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ssl_ctx.load_cert_chain(options.certfile, options.keyfile)
@@ -158,7 +164,8 @@ def get_origin_setting(options):
     if options.origin == '*':
         if not options.debug:
             raise ValueError(
-                'Wildcard origin policy is only allowed in debug mode.'
+                'Wildcard origin policy ("*") is only allowed in debug mode. '
+                'For production, use "same", "primary", or specify allowed domains.'
             )
         else:
             return '*'
@@ -174,7 +181,7 @@ def get_origin_setting(options):
             origins.add(orig)
 
     if not origins:
-        raise ValueError('Empty origin list')
+        raise ValueError('No valid origins found in origin list. Please specify valid domain names or use "same"/"primary".')
 
     return origins
 
@@ -185,7 +192,9 @@ def get_font_filename(font, font_dir):
     if font:
         if font not in filenames:
             raise ValueError(
-                'Font file {!r} not found'.format(os.path.join(font_dir, font))
+                'Custom font file "{}" not found in directory: {}. Available fonts: {}'.format(
+                    font, font_dir, ', '.join(sorted(filenames)) if filenames else 'none'
+                )
             )
     elif filenames:
         font = filenames.pop()
@@ -195,4 +204,7 @@ def get_font_filename(font, font_dir):
 
 def check_encoding_setting(encoding):
     if encoding and not is_valid_encoding(encoding):
-        raise ValueError('Unknown character encoding {!r}.'.format(encoding))
+        raise ValueError(
+            'Unknown character encoding: "{}". Please use a valid Python codec name '
+            '(e.g., utf-8, latin-1, ascii). See Python codec documentation for supported encodings.'.format(encoding)
+        )
