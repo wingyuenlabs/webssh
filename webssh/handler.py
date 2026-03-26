@@ -614,67 +614,78 @@ class WsockHandler(MixinHandler, tornado.websocket.WebSocketHandler):
         logging.info('Connected from {}:{}'.format(*self.src_addr))
 
         workers = clients.get(self.src_addr[0])
+        logging.debug(f"[open] workers for {self.src_addr[0]}: {workers}")
         if not workers:
+            logging.warning(f"[open] No workers found for {self.src_addr[0]}")
             self.close(reason='Websocket authentication failed.')
             return
 
         try:
             worker_id = self.get_value('id')
+            logging.debug(f"[open] Received worker_id: {worker_id}")
         except (tornado.web.MissingArgumentError, InvalidValueError) as exc:
+            logging.warning(f"[open] Exception getting worker_id: {exc}")
             self.close(reason=str(exc))
         else:
             worker = workers.get(worker_id)
+            logging.debug(f"[open] worker for id {worker_id}: {worker}")
             if worker:
                 workers[worker_id] = None
                 self.set_nodelay(True)
                 worker.set_handler(self)
                 self.worker_ref = weakref.ref(worker)
                 self.loop.add_handler(worker.fd, worker, IOLoop.READ)
+                logging.info(f"[open] Associated worker {worker_id} with connection from {self.src_addr}")
             else:
+                logging.warning(f"[open] Worker not found for id {worker_id}")
                 self.close(reason='Websocket authentication failed.')
 
     def on_message(self, message):
-        logging.debug('{!r} from {}:{}'.format(message, *self.src_addr))
+        logging.debug('[on_message] {!r} from {}:{}'.format(message, *self.src_addr))
         worker = self.worker_ref()
         if not worker:
             # The worker has likely been closed. Do not process.
-            logging.debug(
-                "received message to closed worker from {}:{}".format(
-                    *self.src_addr
-                )
-            )
+            logging.warning(f"[on_message] No worker found for {self.src_addr}")
             self.close(reason='No worker found')
             return
 
         if worker.closed:
+            logging.warning(f"[on_message] Worker is already closed for {self.src_addr}")
             self.close(reason='Worker closed')
             return
 
         try:
             msg = json.loads(message)
-        except JSONDecodeError:
+        except JSONDecodeError as e:
+            logging.warning(f"[on_message] JSON decode error: {e} for message: {message}")
             return
 
         if not isinstance(msg, dict):
+            logging.warning(f"[on_message] Message is not a dict: {msg}")
             return
 
         resize = msg.get('resize')
         if resize and len(resize) == 2:
             try:
                 worker.chan.resize_pty(*resize)
-            except (TypeError, struct.error, paramiko.SSHException):
-                pass
+            except (TypeError, struct.error, paramiko.SSHException) as e:
+                logging.warning(f"[on_message] Resize error: {e}")
 
         data = msg.get('data')
         if data and isinstance(data, str):
+            logging.debug(f"[on_message] Appending data to worker: {data}")
             worker.data_to_dst.append(data)
             worker.on_write()
 
     def on_close(self):
-        logging.info('Disconnected from {}:{}'.format(*self.src_addr))
+        logging.info('[on_close] Disconnected from {}:{}'.format(*self.src_addr))
         if not self.close_reason:
             self.close_reason = 'client disconnected'
 
+        logging.debug(f"[on_close] close_reason: {self.close_reason}")
         worker = self.worker_ref() if self.worker_ref else None
         if worker:
+            logging.info(f"[on_close] Closing worker {worker.id} for {self.src_addr}")
             worker.close(reason=self.close_reason)
+        else:
+            logging.debug(f"[on_close] No worker to close for {self.src_addr}")
